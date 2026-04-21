@@ -1,3 +1,18 @@
+function waitForElement(selector) {
+  return new Promise((resolve) => {
+    const existing = document.querySelector(selector);
+    if (existing) return resolve(existing);
+    const observer = new MutationObserver(() => {
+      const el = document.querySelector(selector);
+      if (el) {
+        observer.disconnect();
+        resolve(el);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
 (async () => {
   // Step 1 — validate URL and extract edition + game slug
   const urlMatch = window.location.href.match(
@@ -8,6 +23,8 @@
   const ludumDareNumber = urlMatch[1];
   const gameName = urlMatch[2];
 
+  await waitForElement("#comment-undefined");
+
   // Step 2 — resolve the node id of the current game
   const walkRes = await fetch(
     `https://api.ldjam.com/vx/node2/walk/1/events/ludum-dare/${ludumDareNumber}/${gameName}`
@@ -15,6 +32,19 @@
 
   const gameId = walkRes.node_id;
   if (!gameId) return;
+
+  // Fetch the logged-in user's id from the last avatar link in the page
+  const avatarEl = [...document.querySelectorAll("a.button-base.button-link.-avatar[href^='/users/']")].at(-1);
+  console.log("[LudumExtension] avatarEl href:", avatarEl?.getAttribute("href") ?? "introuvable");
+  const myUsername = avatarEl?.getAttribute("href")?.split("/users/")[1] ?? null;
+  let myId = null;
+  if (myUsername) {
+    const myWalkRes = await fetch(
+      `https://api.ldjam.com/vx/node2/walk/1/users/${myUsername}/games`
+    ).then((r) => r.json());
+    myId = myWalkRes.node_id ?? null;
+  }
+  console.log("[LudumExtension] myUsername:", myUsername, "| myId:", myId);
 
   // Step 3 — fetch all comments on this game
   const commentsRes = await fetch(
@@ -41,12 +71,27 @@
 
     const authorGame = await findGameInEdition(authorId, ludumDareNumber);
     if (authorGame) {
-      injectGameCard(authorId, authorGame, authorToCommentIds);
+      console.log("[LudumExtension] authorGame trouvé:", authorGame.gameName, "| gameId:", authorGame.gameId, "| myId:", myId);
+      const alreadyCommented = myId ? await hasUserCommented(authorGame.gameId, myId) : false;
+      injectGameCard(authorId, authorGame, authorToCommentIds, alreadyCommented);
     }
   }
 })();
 
-function injectGameCard(authorId, game, authorToCommentIds) {
+let _debugLogged = false;
+
+async function hasUserCommented(gameId, userId) {
+  const res = await fetch(`https://api.ldjam.com/vx/comment/getbynode/${gameId}`).then((r) => r.json());
+  const comments = res.comment ?? [];
+  if (!_debugLogged) {
+    console.log("[LudumExtension] debug comments du premier jeu trouvé:", comments);
+    console.log("[LudumExtension] myId:", userId);
+    _debugLogged = true;
+  }
+  return comments.some((c) => c.author === userId);
+}
+
+function injectGameCard(authorId, game, authorToCommentIds, alreadyCommented) {
   const commentIds = authorToCommentIds.get(authorId) ?? [];
   for (const commentId of commentIds) {
     const commentEl = document.getElementById(`comment-${commentId}`);
@@ -96,7 +141,7 @@ function injectGameCard(authorId, game, authorToCommentIds) {
     }
 
     const label = document.createElement("span");
-    label.textContent = game.gameName;
+    label.textContent = game.gameName + (alreadyCommented ? " ✅" : "");
     card.appendChild(label);
 
     lastSpan.insertAdjacentElement("afterend", card);
