@@ -61,16 +61,17 @@ function waitForElement(selector) {
     authorToCommentIds.set(comment.author, list);
   }
 
-  // Steps 4-8 — for every unique commenter, find their game and inject it immediately
+  // Steps 4-8 — process all unique commenters in parallel
   const seenAuthors = new Set();
+  const uniqueComments = comments.filter(({ author }) => {
+    if (seenAuthors.has(author)) return false;
+    seenAuthors.add(author);
+    return true;
+  });
 
-  for (const comment of comments) {
-    const authorId = comment.author;
-    if (seenAuthors.has(authorId)) continue;
-    seenAuthors.add(authorId);
+  uniqueComments.forEach(({ author }) => injectSpinners(author, authorToCommentIds));
 
-    injectSpinners(authorId, authorToCommentIds);
-
+  await Promise.all(uniqueComments.map(async ({ author: authorId }) => {
     const authorGame = await findGameInEdition(authorId, ludumDareNumber);
     removeSpinners(authorId, authorToCommentIds);
 
@@ -79,7 +80,7 @@ function waitForElement(selector) {
       const alreadyCommented = myId ? await hasUserCommented(authorGame.gameId, myId) : false;
       injectGameCard(authorId, authorGame, authorToCommentIds, alreadyCommented);
     }
-  }
+  }));
 })();
 
 let _debugLogged = false;
