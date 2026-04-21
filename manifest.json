@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Ludum Dare Commenters Games",
+  "version": "1.0",
+  "description": "Trouve les jeux soumis dans la même édition de la Ludum Dare par les auteurs de commentaires.",
+  "content_scripts": [
+    {
+      "matches": ["https://ldjam.com/events/ludum-dare/*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "https://api.ldjam.com/*"
+  ]
+}
