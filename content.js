@@ -13,7 +13,26 @@ function waitForElement(selector) {
   });
 }
 
-(async () => {
+function waitForElement(selector) {
+  return new Promise((resolve) => {
+    const existing = document.querySelector(selector);
+    if (existing) return resolve(existing);
+    const observer = new MutationObserver(() => {
+      const el = document.querySelector(selector);
+      if (el) {
+        observer.disconnect();
+        resolve(el);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
+function cleanupInjectedElements() {
+  document.querySelectorAll('[data-ludum-spinner], [data-ludum-card]').forEach(el => el.remove());
+}
+
+async function runExtension() {
   // Step 1 — validate URL and extract edition + game slug
   const urlMatch = window.location.href.match(
     /^https:\/\/ldjam\.com\/events\/ludum-dare\/([^/?#]+)\/([^/?#]+)/
@@ -22,6 +41,11 @@ function waitForElement(selector) {
 
   const ludumDareNumber = urlMatch[1];
   const gameName = urlMatch[2];
+
+  // Clean up previous injections
+  cleanupInjectedElements();
+
+  console.log("[LudumExtension] fetching for", window.location.href);
 
   await waitForElement("#comment-undefined");
 
@@ -81,6 +105,49 @@ function waitForElement(selector) {
       injectGameCard(authorId, authorGame, authorToCommentIds, alreadyCommented);
     }
   }));
+}
+
+(async () => {
+  // Run initially
+  await runExtension();
+
+  // Listen for URL changes (for SPA navigation)
+  let currentUrl = window.location.href;
+
+  // Override pushState and replaceState to dispatch custom events
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+
+  history.pushState = function(state, title, url) {
+    originalPushState.apply(this, arguments);
+    window.dispatchEvent(new CustomEvent('locationchange', { detail: { url } }));
+  };
+
+  history.replaceState = function(state, title, url) {
+    originalReplaceState.apply(this, arguments);
+    window.dispatchEvent(new CustomEvent('locationchange', { detail: { url } }));
+  };
+
+  window.addEventListener('popstate', async () => {
+    if (window.location.href !== currentUrl) {
+      currentUrl = window.location.href;
+      await runExtension();
+    }
+  });
+
+  window.addEventListener('locationchange', async () => {
+    if (window.location.href !== currentUrl) {
+      currentUrl = window.location.href;
+      await runExtension();
+    }
+  });
+
+  // Listen for tab visibility changes
+  window.addEventListener('visibilitychange', async () => {
+    if (!document.hidden) {
+      await runExtension();
+    }
+  });
 })();
 
 let _debugLogged = false;
@@ -137,6 +204,7 @@ function injectGameCard(authorId, game, authorToCommentIds, alreadyCommented) {
     card.href = game.gameUrl;
     card.target = "_blank";
     card.rel = "noopener noreferrer";
+    card.dataset.ludumCard = 'true';
     card.style.cssText = [
       "display:inline",
       "align-items:center",
