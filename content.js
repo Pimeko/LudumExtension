@@ -69,7 +69,11 @@ function waitForElement(selector) {
     if (seenAuthors.has(authorId)) continue;
     seenAuthors.add(authorId);
 
+    injectSpinners(authorId, authorToCommentIds);
+
     const authorGame = await findGameInEdition(authorId, ludumDareNumber);
+    removeSpinners(authorId, authorToCommentIds);
+
     if (authorGame) {
       console.log("[LudumExtension] authorGame trouvé:", authorGame.gameName, "| gameId:", authorGame.gameId, "| myId:", myId);
       const alreadyCommented = myId ? await hasUserCommented(authorGame.gameId, myId) : false;
@@ -89,6 +93,31 @@ async function hasUserCommented(gameId, userId) {
     _debugLogged = true;
   }
   return comments.some((c) => c.author === userId);
+}
+
+function getLastSpan(commentId) {
+  const commentEl = document.getElementById(`comment-${commentId}`);
+  if (!commentEl) return null;
+  const titleEl = commentEl.querySelector(".-title");
+  return titleEl?.lastElementChild ?? null;
+}
+
+function injectSpinners(authorId, authorToCommentIds) {
+  for (const commentId of authorToCommentIds.get(authorId) ?? []) {
+    const lastSpan = getLastSpan(commentId);
+    if (!lastSpan) continue;
+    const spinner = document.createElement("span");
+    spinner.dataset.ludumSpinner = commentId;
+    spinner.style.cssText = "display:inline-block;vertical-align:middle;margin-left:8px;";
+    spinner.innerHTML = `<span style="line-height:0;transform-origin:50% 50%;animation:nav-spinner 2s linear infinite;display:inline-block;"><svg class="svg-icon icon-spinner" style="filter:drop-shadow(0 0 1px rgba(0,0,0,0.5));overflow:visible;"><use xlink:href="#icon-spinner"></use></svg></span>`;
+    lastSpan.insertAdjacentElement("afterend", spinner);
+  }
+}
+
+function removeSpinners(authorId, authorToCommentIds) {
+  for (const commentId of authorToCommentIds.get(authorId) ?? []) {
+    document.querySelector(`[data-ludum-spinner="${commentId}"]`)?.remove();
+  }
 }
 
 function injectGameCard(authorId, game, authorToCommentIds, alreadyCommented) {
