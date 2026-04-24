@@ -5,9 +5,9 @@
   "description": "Find the games submitted to the same Ludum Dare edition by the commenters.",
   "content_scripts": [
     {
-      "matches": ["https://ldjam.com/events/ludum-dare/*/*"],
+      "matches": ["https://ldjam.com/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "host_permissions": [

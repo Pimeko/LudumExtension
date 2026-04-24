@@ -1,17 +1,3 @@
-function waitForElement(selector) {
-  return new Promise((resolve) => {
-    const existing = document.querySelector(selector);
-    if (existing) return resolve(existing);
-    const observer = new MutationObserver(() => {
-      const el = document.querySelector(selector);
-      if (el) {
-        observer.disconnect();
-        resolve(el);
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-  });
-}
 
 function waitForElement(selector) {
   return new Promise((resolve) => {
@@ -37,15 +23,15 @@ async function runExtension() {
   const urlMatch = window.location.href.match(
     /^https:\/\/ldjam\.com\/events\/ludum-dare\/([^/?#]+)\/([^/?#]+)/
   );
-  if (!urlMatch) return;
+  if (!urlMatch) {
+    return;
+  }
 
   const ludumDareNumber = urlMatch[1];
   const gameName = urlMatch[2];
 
   // Clean up previous injections
   cleanupInjectedElements();
-
-  console.log("[LudumExtension] fetching for", window.location.href);
 
   await waitForElement("#comment-undefined");
 
@@ -59,7 +45,6 @@ async function runExtension() {
 
   // Fetch the logged-in user's id from the last avatar link in the page
   const avatarEl = [...document.querySelectorAll("a.button-base.button-link.-avatar[href^='/users/']")].at(-1);
-  console.log("[LudumExtension] avatarEl href:", avatarEl?.getAttribute("href") ?? "introuvable");
   const myUsername = avatarEl?.getAttribute("href")?.split("/users/")[1] ?? null;
   let myId = null;
   if (myUsername) {
@@ -68,7 +53,6 @@ async function runExtension() {
     ).then((r) => r.json());
     myId = myWalkRes.node_id ?? null;
   }
-  console.log("[LudumExtension] myUsername:", myUsername, "| myId:", myId);
 
   // Step 3 — fetch all comments on this game
   const commentsRes = await fetch(
@@ -100,7 +84,6 @@ async function runExtension() {
     removeSpinners(authorId, authorToCommentIds);
 
     if (authorGame) {
-      console.log("[LudumExtension] authorGame trouvé:", authorGame.gameName, "| gameId:", authorGame.gameId, "| myId:", myId);
       const alreadyCommented = myId ? await hasUserCommented(authorGame.gameId, myId) : false;
       injectGameCard(authorId, authorGame, authorToCommentIds, alreadyCommented);
     }
@@ -108,6 +91,12 @@ async function runExtension() {
 }
 
 (async () => {
+  
+  // Attendre que le document soit vraiment prêt au premier chargement
+  if (document.readyState === 'loading') {
+    await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve));
+  }
+  
   // Run initially
   await runExtension();
 
@@ -119,28 +108,29 @@ async function runExtension() {
   const originalReplaceState = history.replaceState;
 
   history.pushState = function(state, title, url) {
-    originalPushState.apply(this, arguments);
+    const result = originalPushState.apply(this, arguments);
     window.dispatchEvent(new CustomEvent('locationchange', { detail: { url } }));
+    return result;
   };
 
   history.replaceState = function(state, title, url) {
-    originalReplaceState.apply(this, arguments);
+    const result = originalReplaceState.apply(this, arguments);
     window.dispatchEvent(new CustomEvent('locationchange', { detail: { url } }));
+    return result;
   };
 
-  window.addEventListener('popstate', async () => {
+  const handleUrlChange = async () => {
     if (window.location.href !== currentUrl) {
       currentUrl = window.location.href;
       await runExtension();
     }
-  });
+  };
 
-  window.addEventListener('locationchange', async () => {
-    if (window.location.href !== currentUrl) {
-      currentUrl = window.location.href;
-      await runExtension();
-    }
-  });
+  window.addEventListener('popstate', handleUrlChange);
+  window.addEventListener('locationchange', handleUrlChange);
+
+  // Poll URL in case navigation happens without history events
+  setInterval(handleUrlChange, 250);
 
   // Listen for tab visibility changes
   window.addEventListener('visibilitychange', async () => {
@@ -155,11 +145,6 @@ let _debugLogged = false;
 async function hasUserCommented(gameId, userId) {
   const res = await fetch(`https://api.ldjam.com/vx/comment/getbynode/${gameId}`).then((r) => r.json());
   const comments = res.comment ?? [];
-  if (!_debugLogged) {
-    console.log("[LudumExtension] debug comments du premier jeu trouvé:", comments);
-    console.log("[LudumExtension] myId:", userId);
-    _debugLogged = true;
-  }
   return comments.some((c) => c.author === userId);
 }
 
