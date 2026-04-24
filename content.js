@@ -18,6 +18,14 @@ function cleanupInjectedElements() {
   document.querySelectorAll('[data-ludum-spinner], [data-ludum-card]').forEach(el => el.remove());
 }
 
+const pageState = {
+  initialized: false,
+  url: null,
+  myId: null,
+  gameId: null,
+  authorToGame: new Map(),
+};
+
 async function runExtension() {
   // Step 1 — validate URL and extract edition + game slug
   const urlMatch = window.location.href.match(
@@ -69,6 +77,8 @@ async function runExtension() {
     authorToCommentIds.set(comment.author, list);
   }
 
+  const authorToGame = new Map();
+
   // Steps 4-8 — process all unique commenters in parallel
   const seenAuthors = new Set();
   const uniqueComments = comments.filter(({ author }) => {
@@ -84,10 +94,17 @@ async function runExtension() {
     removeSpinners(authorId, authorToCommentIds);
 
     if (authorGame) {
+      authorToGame.set(authorId, authorGame);
       const alreadyCommented = myId ? await hasUserCommented(authorGame.gameId, myId) : false;
       injectGameCard(authorId, authorGame, authorToCommentIds, alreadyCommented);
     }
   }));
+
+  pageState.initialized = true;
+  pageState.url = window.location.href;
+  pageState.myId = myId;
+  pageState.gameId = gameId;
+  pageState.authorToGame = authorToGame;
 }
 
 (async () => {
@@ -135,7 +152,11 @@ async function runExtension() {
   // Listen for tab visibility changes
   window.addEventListener('visibilitychange', async () => {
     if (!document.hidden) {
-      await runExtension();
+      if (pageState.initialized && pageState.url === window.location.href) {
+        await refreshChecks();
+      } else {
+        await runExtension();
+      }
     }
   });
 })();
@@ -190,6 +211,8 @@ function injectGameCard(authorId, game, authorToCommentIds, alreadyCommented) {
     card.target = "_blank";
     card.rel = "noopener noreferrer";
     card.dataset.ludumCard = 'true';
+    card.dataset.ludumAuthor = authorId;
+    card.dataset.ludumGameId = game.gameId;
     card.style.cssText = [
       "display:inline",
       "align-items:center",
@@ -224,10 +247,40 @@ function injectGameCard(authorId, game, authorToCommentIds, alreadyCommented) {
     }
 
     const label = document.createElement("span");
+    label.dataset.ludumLabel = 'true';
+    label.dataset.ludumBaseName = game.gameName;
     label.textContent = game.gameName + (alreadyCommented ? " ✅" : "");
     card.appendChild(label);
 
     lastSpan.insertAdjacentElement("afterend", card);
+  }
+}
+
+function updateGameCardCheck(authorId, alreadyCommented) {
+  const cards = document.querySelectorAll(`a[data-ludum-card][data-ludum-author="${authorId}"]`);
+  for (const card of cards) {
+    const label = card.querySelector('[data-ludum-label]');
+    if (!label) continue;
+    const baseName = label.dataset.ludumBaseName ?? label.textContent.replace(/\s*✅$/, "");
+    label.dataset.ludumBaseName = baseName;
+    label.textContent = baseName + (alreadyCommented ? " ✅" : "");
+  }
+}
+
+async function refreshChecks() {
+  if (!pageState.initialized || !pageState.myId) return;
+  for (const [authorId, game] of pageState.authorToGame) {
+    // Vérifier si c'était déjà checké avant
+    const cards = document.querySelectorAll(`a[data-ludum-card][data-ludum-author="${authorId}"]`);
+    const wasAlreadyChecked = Array.from(cards).some(card => {
+      const label = card.querySelector('[data-ludum-label]');
+      return label && label.textContent.includes('✅');
+    });
+
+    if (!wasAlreadyChecked) {
+      const alreadyCommented = await hasUserCommented(game.gameId, pageState.myId);
+      updateGameCardCheck(authorId, alreadyCommented);
+    }
   }
 }
 
